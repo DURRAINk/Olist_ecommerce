@@ -1,0 +1,895 @@
+{
+  "datasets": [
+    {
+      "name": "79c6d845",
+      "displayName": "olist_customers",
+      "config": {
+        "version": "1.1",
+        "source": "olist_ecommerce.default.olist_customers",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "76cc6860",
+      "displayName": "olist_order_records",
+      "config": {
+        "version": "1.1",
+        "source": "olist_ecommerce.default.olist_order_records",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "1689bc77",
+      "displayName": "customer_retention_cohort",
+      "queryLines": [
+        "WITH customer_orders AS (\n",
+        "  SELECT\n",
+        "    oc.customer_unique_id,\n",
+        "    DATE_TRUNC('quarter', oor.order_purchase_timestamp) AS order_quarter\n",
+        "  FROM\n",
+        "    olist_ecommerce.default.olist_order_records AS oor\n",
+        "      INNER JOIN olist_ecommerce.default.olist_customers AS oc\n",
+        "        ON oor.customer_id = oc.customer_id\n",
+        "  WHERE\n",
+        "    oor.order_purchase_timestamp IS NOT NULL\n",
+        "    AND oc.customer_unique_id IS NOT NULL\n",
+        "),\n",
+        "first_purchase AS (\n",
+        "  SELECT\n",
+        "    customer_unique_id,\n",
+        "    MIN(order_quarter) AS cohort_quarter\n",
+        "  FROM\n",
+        "    customer_orders\n",
+        "  GROUP BY\n",
+        "    customer_unique_id\n",
+        "),\n",
+        "cohort_activity AS (\n",
+        "  SELECT\n",
+        "    fp.cohort_quarter,\n",
+        "    CAST(FLOOR(months_between(co.order_quarter, fp.cohort_quarter) / 3) AS INT) AS quarter_number,\n",
+        "    COUNT(DISTINCT co.customer_unique_id) AS retained_customers\n",
+        "  FROM\n",
+        "    customer_orders AS co\n",
+        "      INNER JOIN first_purchase AS fp\n",
+        "        ON co.customer_unique_id = fp.customer_unique_id\n",
+        "  GROUP BY\n",
+        "    fp.cohort_quarter,\n",
+        "    CAST(FLOOR(months_between(co.order_quarter, fp.cohort_quarter) / 3) AS INT)\n",
+        "),\n",
+        "cohort_size AS (\n",
+        "  SELECT\n",
+        "    cohort_quarter,\n",
+        "    COUNT(DISTINCT customer_unique_id) AS cohort_size\n",
+        "  FROM\n",
+        "    first_purchase\n",
+        "  GROUP BY\n",
+        "    cohort_quarter\n",
+        ")\n",
+        "SELECT\n",
+        "  ca.cohort_quarter,\n",
+        "  ca.quarter_number,\n",
+        "  ca.retained_customers,\n",
+        "  cs.cohort_size,\n",
+        "  ROUND(100.0 * ca.retained_customers / cs.cohort_size, 2) AS retention_pct\n",
+        "FROM\n",
+        "  cohort_activity AS ca\n",
+        "    INNER JOIN cohort_size AS cs\n",
+        "      ON ca.cohort_quarter = cs.cohort_quarter\n",
+        "ORDER BY\n",
+        "  ca.cohort_quarter,\n",
+        "  ca.quarter_number"
+      ]
+    },
+    {
+      "name": "62e99999",
+      "displayName": "experiment",
+      "queryLines": [
+        "WITH customer_first_order AS (\n",
+        "  SELECT\n",
+        "    oc.customer_unique_id,\n",
+        "    MIN(oor.order_purchase_timestamp) AS first_order_ts,\n",
+        "    MODE(oc.customer_state) AS customer_state,\n",
+        "    MODE(oc.customer_city) AS customer_city,\n",
+        "    AVG(oc.geolocation_lat) AS geolocation_lat,\n",
+        "    AVG(oc.geolocation_lng) AS geolocation_lng\n",
+        "  FROM\n",
+        "    olist_ecommerce.default.olist_customers AS oc\n",
+        "      INNER JOIN olist_ecommerce.default.olist_order_records AS oor\n",
+        "        ON oc.customer_id = oor.customer_id\n",
+        "  GROUP BY\n",
+        "    oc.customer_unique_id\n",
+        "),\n",
+        "customer_orders AS (\n",
+        "  SELECT\n",
+        "    oc.customer_unique_id,\n",
+        "    oor.order_purchase_timestamp\n",
+        "  FROM\n",
+        "    olist_ecommerce.default.olist_customers AS oc\n",
+        "      INNER JOIN olist_ecommerce.default.olist_order_records AS oor\n",
+        "        ON oc.customer_id = oor.customer_id\n",
+        ")\n",
+        "SELECT\n",
+        "  o.customer_unique_id,\n",
+        "  MODE(fo.first_order_ts) AS first_order_ts,\n",
+        "  MODE(fo.customer_state) AS customer_state,\n",
+        "  MODE(fo.customer_city) AS customer_city,\n",
+        "  AVG(fo.geolocation_lat) AS geolocation_lat,\n",
+        "  AVG(fo.geolocation_lng) AS geolocation_lng,\n",
+        "  COUNT(*) AS total_orders\n",
+        "FROM\n",
+        "  customer_orders AS o\n",
+        "    LEFT JOIN customer_first_order AS fo\n",
+        "      ON o.customer_unique_id = fo.customer_unique_id\n",
+        "GROUP BY\n",
+        "  o.customer_unique_id"
+      ]
+    },
+    {
+      "name": "c5a7c071",
+      "displayName": "customer_rfm",
+      "queryLines": [
+        "select * from olist_ecommerce.retention.customer_rfm"
+      ]
+    },
+    {
+      "name": "8ef06fe8",
+      "displayName": "customer_reviews",
+      "queryLines": [
+        "select * from olist_order_reviews"
+      ]
+    }
+  ],
+  "relationshipGraphs": [
+    {
+      "sources": [
+        {
+          "name": "olist_customers",
+          "datasetName": "79c6d845"
+        },
+        {
+          "name": "olist_order_records",
+          "datasetName": "76cc6860"
+        },
+        {
+          "name": "Untitled_dataset",
+          "datasetName": "1689bc77"
+        },
+        {
+          "name": "Untitled_dataset_1",
+          "datasetName": "62e99999"
+        },
+        {
+          "name": "Untitled_dataset_2",
+          "datasetName": "c5a7c071"
+        },
+        {
+          "name": "Untitled_dataset_3",
+          "datasetName": "8ef06fe8"
+        }
+      ],
+      "relationships": [
+        {
+          "name": "olist_customers_olist_order_records",
+          "from": "olist_customers",
+          "to": "olist_order_records",
+          "on": "`olist_customers`.`customer_id` = `olist_order_records`.`customer_id`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "f80c90aa",
+      "displayName": "customer_retention",
+      "layout": [
+        {
+          "widget": {
+            "name": "customer_retention_cohort",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset__cohort_quarter",
+                      "expression": "`Untitled_dataset`.`cohort_quarter`"
+                    },
+                    {
+                      "name": "Untitled_dataset__quarter_number",
+                      "expression": "`Untitled_dataset`.`quarter_number`"
+                    },
+                    {
+                      "name": "min(Untitled_dataset__retained_customers)",
+                      "expression": "MIN(`Untitled_dataset`.`retained_customers`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "Untitled_dataset__cohort_quarter"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "Untitled_dataset__quarter_number"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`Untitled_dataset`.`cohort_quarter`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`Untitled_dataset`.`quarter_number`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 18px;\">Customer Retention Cohort (Quarterly)</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 4,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": {
+                  "fields": [
+                    {
+                      "fieldName": "Untitled_dataset__cohort_quarter",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "columns": {
+                  "fields": [
+                    {
+                      "fieldName": "Untitled_dataset__quarter_number",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "cells": {
+                  "fields": [
+                    {
+                      "fieldName": "min(Untitled_dataset__retained_customers)",
+                      "format": {
+                        "type": "number-plain",
+                        "abbreviation": "none",
+                        "decimalPlaces": {
+                          "type": "exact",
+                          "places": 2
+                        },
+                        "hideGroupSeparator": true
+                      },
+                      "cellType": "text",
+                      "style": {
+                        "type": "basic"
+                      }
+                    }
+                  ],
+                  "displayAs": "rows"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "sales",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "monthly(olist_order_records__order_purchase_timestamp)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `olist_order_records`.`order_purchase_timestamp`)"
+                    },
+                    {
+                      "name": "sum(olist_order_records__total_price)",
+                      "expression": "SUM(`olist_order_records`.`total_price`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`olist_customers`.`customer_state` IN (`olist_customers`.`customer_state`) OR TRUE"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 14px;\">Sales</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "lineShape": "linear"
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(olist_order_records__order_purchase_timestamp)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(olist_order_records__total_price)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "customer-ratings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "bin(Untitled_dataset_3__review_score, binWidth=1)",
+                      "expression": "BIN_FLOOR(`Untitled_dataset_3`.`review_score`, 1)"
+                    },
+                    {
+                      "name": "count(Untitled_dataset_3__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_3`.`*`))"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`Untitled_dataset_3`.`is_imputed` IN (FALSE)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\">Customer Ratings</span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  }
+                ]
+              },
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(Untitled_dataset_3__review_score, binWidth=1)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Untitled_dataset_3__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 7,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "4ff6c3d1",
+            "multilineTextboxSpec": {
+              "lines": [
+                "<span style=\"text-align:center;display:block\"><span style=\"font-size:24px\">Olist Company's Progress</span></span>"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "6bb1a9a4",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset_1__total_orders",
+                      "expression": "`Untitled_dataset_1`.`total_orders`"
+                    },
+                    {
+                      "name": "countdistinct(Untitled_dataset_1__customer_unique_id)",
+                      "expression": "COUNT(DISTINCT `Untitled_dataset_1`.`customer_unique_id`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`Untitled_dataset_1`.`customer_state` IN (`Untitled_dataset_1`.`customer_state`) OR TRUE"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\">Distribution of Total Orders by customers</span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Untitled_dataset_1__total_orders",
+                  "displayName": "total_orders",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "countdistinct(Untitled_dataset_1__customer_unique_id)",
+                  "displayName": "Customers",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Untitled_dataset_1__total_orders",
+                  "displayName": "total_orders",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 8,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "47187e9e",
+      "displayName": "customer_segmentation",
+      "layout": [
+        {
+          "widget": {
+            "name": "total-customer-value-segmentation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "count(Untitled_dataset_2__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_2`.`*`))"
+                    },
+                    {
+                      "name": "Untitled_dataset_2__customer_value",
+                      "expression": "`Untitled_dataset_2`.`customer_value`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 14px;\">Total Customer Value Segmentation</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "count(Untitled_dataset_2__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Untitled_dataset_2__customer_value",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "monetary-spend-distribution",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "bin(Untitled_dataset_2__monetary_value, binWidth=100)",
+                      "expression": "BIN_FLOOR(`Untitled_dataset_2`.`monetary_value`, 100)"
+                    },
+                    {
+                      "name": "count(Untitled_dataset_2__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_2`.`*`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 14px;\">Monetary Spend Distribution</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(Untitled_dataset_2__monetary_value, binWidth=100)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Untitled_dataset_2__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 7,
+            "width": 5,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "customer-tenure-distribution",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "bin(Untitled_dataset_2__tenure_days, binWidth=100)",
+                      "expression": "BIN_FLOOR(`Untitled_dataset_2`.`tenure_days`, 100)"
+                    },
+                    {
+                      "name": "count(Untitled_dataset_2__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_2`.`*`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 14px;\">Customer Tenure Distribution</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(Untitled_dataset_2__tenure_days, binWidth=100)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Untitled_dataset_2__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 5,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "customer-score-distribution",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset_2__customer_value",
+                      "expression": "`Untitled_dataset_2`.`customer_value`"
+                    },
+                    {
+                      "name": "bin(Untitled_dataset_2__rfm_score, binWidth=1)",
+                      "expression": "BIN_FLOOR(`Untitled_dataset_2`.`rfm_score`, 1)"
+                    },
+                    {
+                      "name": "count(Untitled_dataset_2__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_2`.`*`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block\"><span style=\"font-size:14px\">Customer RFM Score Distribution</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(Untitled_dataset_2__rfm_score, binWidth=1)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Untitled_dataset_2__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Untitled_dataset_2__customer_value",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "top-6-valuable-customers",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset_2__customer_unique_id",
+                      "expression": "`Untitled_dataset_2`.`customer_unique_id`"
+                    },
+                    {
+                      "name": "Untitled_dataset_2__tenure_days",
+                      "expression": "`Untitled_dataset_2`.`tenure_days`"
+                    },
+                    {
+                      "name": "Untitled_dataset_2__rfm_score",
+                      "expression": "`Untitled_dataset_2`.`rfm_score`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`Untitled_dataset_2`.`rfm_score`"
+                    },
+                    {
+                      "direction": "DESC",
+                      "expression": "`Untitled_dataset_2`.`tenure_days`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\">Top 6 Valuable Customers</span>",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "rowsPerPage": 6,
+              "displayRowNumbers": true,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Untitled_dataset_2__customer_unique_id"
+                  },
+                  {
+                    "fieldName": "Untitled_dataset_2__tenure_days"
+                  },
+                  {
+                    "fieldName": "Untitled_dataset_2__rfm_score"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 2
+                    }
+                  },
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 1
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 7,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
