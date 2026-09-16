@@ -9,7 +9,7 @@
 ![Cohort](https://img.shields.io/badge/Analysis-Cohort--Retention-red)
 
 ## 📖 Overview
-This project analyzes the Brazilian E‑Commerce Public Dataset (Olist) using Azure Databricks connected to Azure Data Lake Storage (ADLS).
+This project analyzes the Brazilian E‑Commerce Public Dataset ([Olist_Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce/data)) using Azure Databricks connected to Azure Data Lake Storage (ADLS).
 The goal is to build a scalable Medallion architecture and perform customer retention analysis with advanced techniques such as cohort analysis, hypothesis testing, and RFM scoring.
 Interactive dashboards were created in Databricks to visualize insights.
 
