@@ -96,6 +96,8 @@ Interactive dashboards were created in Databricks to visualize insights.
 
 ![image_1789482705950.png](./image_1789482705950.png "image_1789482705950.png")
 ![image_1789482909031.png](./image_1789482909031.png "image_1789482909031.png")
+### 🔎 Quick Report
+The current state shows low retention and few valuable customers, which poses a challenge for sustainable growth. Immediate focus should be on strengthening retention programs and expanding the base of high‑value customers to stabilize revenue and reduce dependency on acquisition.
 
 ## 🗂 Unity Catalog Pics
 
