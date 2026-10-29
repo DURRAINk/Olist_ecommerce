@@ -5,7 +5,7 @@
       "displayName": "olist_customers",
       "config": {
         "version": "1.1",
-        "source": "olist_ecommerce.default.olist_customers",
+        "source": "olist_ecommerce.gold.olist_customers",
         "dimensions": [
           {
             "expr": "source.*"
@@ -26,7 +26,7 @@
       "displayName": "olist_order_records",
       "config": {
         "version": "1.1",
-        "source": "olist_ecommerce.default.olist_order_records",
+        "source": "olist_ecommerce.gold.olist_orders",
         "dimensions": [
           {
             "expr": "source.*"
@@ -51,8 +51,8 @@
         "    oc.customer_unique_id,\n",
         "    DATE_TRUNC('quarter', oor.order_purchase_timestamp) AS order_quarter\n",
         "  FROM\n",
-        "    olist_ecommerce.default.olist_order_records AS oor\n",
-        "      INNER JOIN olist_ecommerce.default.olist_customers AS oc\n",
+        "    olist_ecommerce.gold.olist_orders AS oor\n",
+        "      INNER JOIN olist_ecommerce.gold.olist_customers AS oc\n",
         "        ON oor.customer_id = oc.customer_id\n",
         "  WHERE\n",
         "    oor.order_purchase_timestamp IS NOT NULL\n",
@@ -117,8 +117,8 @@
         "    AVG(oc.geolocation_lat) AS geolocation_lat,\n",
         "    AVG(oc.geolocation_lng) AS geolocation_lng\n",
         "  FROM\n",
-        "    olist_ecommerce.default.olist_customers AS oc\n",
-        "      INNER JOIN olist_ecommerce.default.olist_order_records AS oor\n",
+        "    olist_ecommerce.gold.olist_customers AS oc\n",
+        "      INNER JOIN olist_ecommerce.gold.olist_orders AS oor\n",
         "        ON oc.customer_id = oor.customer_id\n",
         "  GROUP BY\n",
         "    oc.customer_unique_id\n",
@@ -128,8 +128,8 @@
         "    oc.customer_unique_id,\n",
         "    oor.order_purchase_timestamp\n",
         "  FROM\n",
-        "    olist_ecommerce.default.olist_customers AS oc\n",
-        "      INNER JOIN olist_ecommerce.default.olist_order_records AS oor\n",
+        "    olist_ecommerce.gold.olist_customers AS oc\n",
+        "      INNER JOIN olist_ecommerce.gold.olist_orders AS oor\n",
         "        ON oc.customer_id = oor.customer_id\n",
         ")\n",
         "SELECT\n",
@@ -159,7 +159,94 @@
       "name": "8ef06fe8",
       "displayName": "customer_reviews",
       "queryLines": [
-        "select * from olist_order_reviews"
+        "select * from olist_ecommerce.gold.olist_order_reviews"
+      ]
+    },
+    {
+      "name": "d616973f",
+      "displayName": "Customer Insights Overview",
+      "queryLines": [
+        "select * from ecommerce.gold.gld_order_items"
+      ]
+    },
+    {
+      "name": "a364392a",
+      "displayName": "customer_value_retention",
+      "queryLines": [
+        "WITH customer_first_order AS (\n",
+        "  SELECT\n",
+        "    customer_unique_id,\n",
+        "    MIN(DATE_TRUNC('quarter', order_purchase_timestamp)) AS first_order_quarter\n",
+        "  FROM\n",
+        "    olist_ecommerce.gold.olist_orders\n",
+        "  GROUP BY\n",
+        "    customer_unique_id\n",
+        "),\n",
+        "customer_quarterly_activity AS (\n",
+        "  SELECT\n",
+        "    o.customer_unique_id,\n",
+        "    rfm.customer_value,\n",
+        "    f.first_order_quarter,\n",
+        "    DATE_TRUNC('quarter', o.order_purchase_timestamp) AS activity_quarter,\n",
+        "    CAST(\n",
+        "      FLOOR(\n",
+        "        months_between(DATE_TRUNC('quarter', o.order_purchase_timestamp), f.first_order_quarter) / 3\n",
+        "      ) AS INT\n",
+        "    ) AS quarters_since_first\n",
+        "  FROM\n",
+        "    olist_ecommerce.gold.olist_orders o\n",
+        "      JOIN customer_first_order f\n",
+        "        ON o.customer_unique_id = f.customer_unique_id\n",
+        "      JOIN olist_ecommerce.retention.customer_rfm rfm\n",
+        "        ON o.customer_unique_id = rfm.customer_unique_id\n",
+        "  GROUP BY\n",
+        "    o.customer_unique_id,\n",
+        "    rfm.customer_value,\n",
+        "    f.first_order_quarter,\n",
+        "    DATE_TRUNC('quarter', o.order_purchase_timestamp)\n",
+        "),\n",
+        "cohort_sizes AS (\n",
+        "  SELECT\n",
+        "    customer_value,\n",
+        "    first_order_quarter,\n",
+        "    COUNT(DISTINCT customer_unique_id) AS cohort_size\n",
+        "  FROM\n",
+        "    customer_quarterly_activity\n",
+        "  WHERE\n",
+        "    quarters_since_first = 0\n",
+        "  GROUP BY\n",
+        "    customer_value,\n",
+        "    first_order_quarter\n",
+        "),\n",
+        "cohort_activity AS (\n",
+        "  SELECT\n",
+        "    customer_value,\n",
+        "    first_order_quarter,\n",
+        "    quarters_since_first,\n",
+        "    COUNT(DISTINCT customer_unique_id) AS active_customers\n",
+        "  FROM\n",
+        "    customer_quarterly_activity\n",
+        "  GROUP BY\n",
+        "    customer_value,\n",
+        "    first_order_quarter,\n",
+        "    quarters_since_first\n",
+        ")\n",
+        "SELECT\n",
+        "  c.customer_value AS cohort_segment,\n",
+        "  c.first_order_quarter AS cohort_quarter,\n",
+        "  c.cohort_size,\n",
+        "  a.quarters_since_first,\n",
+        "  a.active_customers,\n",
+        "  ROUND(a.active_customers * 100.0 / c.cohort_size, 2) AS retention_rate_pct\n",
+        "FROM\n",
+        "  cohort_sizes c\n",
+        "    LEFT JOIN cohort_activity a\n",
+        "      ON c.customer_value = a.customer_value\n",
+        "      AND c.first_order_quarter = a.first_order_quarter\n",
+        "ORDER BY\n",
+        "  c.customer_value,\n",
+        "  c.first_order_quarter,\n",
+        "  a.quarters_since_first"
       ]
     }
   ],
@@ -189,6 +276,14 @@
         {
           "name": "Untitled_dataset_3",
           "datasetName": "8ef06fe8"
+        },
+        {
+          "name": "Untitled_dataset_4",
+          "datasetName": "d616973f"
+        },
+        {
+          "name": "Untitled_dataset_5",
+          "datasetName": "a364392a"
         }
       ],
       "relationships": [
@@ -545,6 +640,135 @@
             "width": 8,
             "height": 6
           }
+        },
+        {
+          "widget": {
+            "name": "f1fa3476",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset_5__cohort_segment",
+                      "expression": "`Untitled_dataset_5`.`cohort_segment`"
+                    },
+                    {
+                      "name": "Untitled_dataset_5__cohort_quarter",
+                      "expression": "`Untitled_dataset_5`.`cohort_quarter`"
+                    },
+                    {
+                      "name": "Untitled_dataset_5__quarters_since_first",
+                      "expression": "`Untitled_dataset_5`.`quarters_since_first`"
+                    },
+                    {
+                      "name": "min(Untitled_dataset_5__retention_rate_pct)",
+                      "expression": "MIN(`Untitled_dataset_5`.`retention_rate_pct`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "Untitled_dataset_5__cohort_segment",
+                          "Untitled_dataset_5__cohort_quarter"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "Untitled_dataset_5__quarters_since_first"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`Untitled_dataset_5`.`cohort_segment`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`Untitled_dataset_5`.`cohort_quarter`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`Untitled_dataset_5`.`quarters_since_first`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"text-align:center;display:block;\"><span style=\"font-size: 14px;font-weight: 700;\">Customer Value Retention Cohort</span></span>",
+                  "fields": []
+                }
+              },
+              "version": 4,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": {
+                  "fields": [
+                    {
+                      "fieldName": "Untitled_dataset_5__cohort_segment",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    },
+                    {
+                      "fieldName": "Untitled_dataset_5__cohort_quarter",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "columns": {
+                  "fields": [
+                    {
+                      "fieldName": "Untitled_dataset_5__quarters_since_first",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "cells": {
+                  "fields": [
+                    {
+                      "fieldName": "min(Untitled_dataset_5__retention_rate_pct)",
+                      "format": {
+                        "abbreviation": "none",
+                        "decimalPlaces": {
+                          "places": 2,
+                          "type": "exact"
+                        },
+                        "hideGroupSeparator": true,
+                        "type": "number-plain"
+                      },
+                      "cellType": "text",
+                      "style": {
+                        "type": "basic"
+                      }
+                    }
+                  ],
+                  "displayAs": "rows"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 12,
+            "height": 16
+          }
         }
       ],
       "pageType": "PAGE_TYPE_CANVAS",
@@ -724,7 +948,7 @@
           "position": {
             "x": 0,
             "y": 13,
-            "width": 5,
+            "width": 6,
             "height": 5
           }
         },
@@ -878,6 +1102,147 @@
             "x": 0,
             "y": 7,
             "width": 7,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "784d6d13",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Untitled_dataset_2__tenure_days)",
+                      "expression": "AVG(`Untitled_dataset_2`.`tenure_days`)"
+                    },
+                    {
+                      "name": "bin(Untitled_dataset_2__freq_outcome, binWidth=1)",
+                      "expression": "BIN_FLOOR(`Untitled_dataset_2`.`freq_outcome`, 1)"
+                    },
+                    {
+                      "name": "count(Untitled_dataset_2__*)",
+                      "expression": "COUNT(STRUCT(`Untitled_dataset_2`.`*`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Frequency Outcome Distribution",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(Untitled_dataset_2__freq_outcome, binWidth=1)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Untitled_dataset_2__*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "avg(Untitled_dataset_2__tenure_days)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 13,
+            "width": 6,
+            "height": 11
+          }
+        },
+        {
+          "widget": {
+            "name": "top-customers-beyond-expected-frequency",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Untitled_dataset_2__customer_unique_id",
+                      "expression": "`Untitled_dataset_2`.`customer_unique_id`"
+                    },
+                    {
+                      "name": "Untitled_dataset_2__tenure_days",
+                      "expression": "`Untitled_dataset_2`.`tenure_days`"
+                    },
+                    {
+                      "name": "Untitled_dataset_2__freq_outcome",
+                      "expression": "`Untitled_dataset_2`.`freq_outcome`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`Untitled_dataset_2`.`freq_outcome`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "<span style=\"font-weight: 700;\">Top Customers going beyond the expected frequency</span>",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Untitled_dataset_2__customer_unique_id"
+                  },
+                  {
+                    "fieldName": "Untitled_dataset_2__tenure_days"
+                  },
+                  {
+                    "fieldName": "Untitled_dataset_2__freq_outcome"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 2
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 6,
             "height": 6
           }
         }
